@@ -27,8 +27,7 @@ string hashSimple(const string & datos) {
     for (char c : datos) { //Por cada letra actualiza el valor de hash
         hash = ((hash << 5) + hash) + c; //<< multiplica por 32 (<<5=2**5) (forma que usan las computadoras)
     } //+hash = has*32 osea en realidad se hace en hash*33 luego se le suma c
-    //En resumen: Por cada letra, el hash actual se multiplica por 33 y se le suma el valor de la letra.
-    //se convierte a string en base hexadecimal
+
     string resultado = "";
     unsigned long temp=hash; //variable temporal que tiene el hash aterior
     const string hex= "0123456789abcdef"; //base 16
@@ -68,16 +67,14 @@ struct Block {
     }
 };
 class Blockchain {
+private:
     vector<Block> cadena;
     int dificultad;
     Blockchain() {
-        dificultad = 1; // o el que quieras por defecto
+        dificultad = 1;
         crearBloqueGenesis();
     }
 
-    // Bloquear copia y asignación
-    Blockchain(const Blockchain&) = delete;
-    Blockchain& operator=(const Blockchain&) = delete;
 
     void crearBloqueGenesis() {
         vector<Voto> vacio;
@@ -85,13 +82,24 @@ class Blockchain {
         cadena.push_back(genesis);
     }
 public:
+
+    Blockchain(const Blockchain&) = default;
+    Blockchain& operator=(const Blockchain&) = default;
     static Blockchain& getInstance() {
         static Blockchain instancia;
         return instancia;
     }
+    static bool sonIguales(const Blockchain& a, const Blockchain& b) {
+        if (a.cadena.size() != b.cadena.size()) return false;
+        for (size_t i = 0; i < a.cadena.size(); i++) {
+            Block ba = a.cadena[i], bb = b.cadena[i];
+            if (ba.calcularhash() != bb.calcularhash()) return false;
+        }
+        return true;
+    }
 
     void mineBlock(Block& bloque, int dificultad) {
-        string objetivo(dificultad, '0');  // ej. dificultad=3 → "000"
+        string objetivo(dificultad, '0');
 
         while (bloque.current_hash.substr(0, dificultad) != objetivo) {
             bloque.nonce++;
@@ -101,17 +109,15 @@ public:
         cout << "Bloque minado: " << bloque.current_hash << endl;
     }
     bool isChainValid() {
+
         for (int i = 1; i < (int)cadena.size(); i++) {
             Block& actual = cadena[i];
             Block& anterior = cadena[i-1];
 
-            // (a) ¿El hash guardado coincide con el recalculado?
-            //     Si alguien cambió un voto, el hash ya no cuadra.
             if (actual.current_hash != actual.calcularhash()) {
                 return false;
             }
 
-            // (b) ¿El previous_hash apunta correctamente al anterior?
             if (actual.previous_hash != anterior.current_hash) {
                 return false;
             }
@@ -122,8 +128,10 @@ public:
     void agregarBloque(Block nuevo) {
         cadena.push_back(nuevo);
     }
+    void _forzarCambioVoto(int idxBloque, int idxVoto, string nuevaOpcion) {
+        cadena[idxBloque].votos[idxVoto].opcionelegida = nuevaOpcion;
+    }
 
-    // Helpers para que los otros integrantes los usen
     Block getUltimoBloque() {
         return cadena.back();
     }
@@ -160,9 +168,11 @@ class MesaElectoralObserver {
 class MesaElectoral : public MesaElectoralObserver {
 private:
     int indice;
-    Blockchain& bc;
+    Blockchain bc;
 public:
-    MesaElectoral(int ind) : bc(Blockchain::getInstance()), indice(ind) {}
+    MesaElectoral(int ind) : indice(ind), bc(Blockchain::getInstance()) {}
+    Blockchain& getCadena() { return bc; }
+    int getIndice() const { return indice; }
     void update(Block& bloque) override {
         cout << "La mesa " << indice << " recibio el bloque " << bloque.indice << endl;
         if (bc.getUltimoBloque().current_hash == bloque.current_hash) {
@@ -188,36 +198,56 @@ public:
             for_each(observers.begin(), observers.end(), [&bloque](MesaElectoralObserver* observer) {
                 observer->update(bloque);});}};
 
+int main() {
+    MesaElectoral mesa1(1), mesa2(2), mesa3(3);
+    CentroElectoralSubject centro;
+    centro.attach(mesa1); centro.attach(mesa2); centro.attach(mesa3);
 
-    int main(){
-        Blockchain& bc = Blockchain::getInstance();
+    // --- bloque 1 minado por mesa1 ---
+    vector<Voto> votos1 = { Voto("voter_001","Candidato A"),
+                            Voto("voter_002","Candidato B") };
+    Blockchain& cad1 = mesa1.getCadena();
+    Block b1(cad1.getSize(), cad1.getUltimoBloque().current_hash, votos1);
+    cad1.mineBlock(b1, cad1.getDificultad());
+    centro.notificarNuevoBloque(b1);
 
-        //Creamos las mesas
-        MesaElectoral mesa1(1);
-        MesaElectoral mesa2(2);
-        MesaElectoral mesa3(3);
+    // --- bloque 2 minado por mesa2 ---
+    vector<Voto> votos2 = { Voto("voter_003","Candidato A"),
+                            Voto("voter_004","Candidato A") };
+    Blockchain& cad2 = mesa2.getCadena();
+    Block b2(cad2.getSize(), cad2.getUltimoBloque().current_hash, votos2);
+    cad2.mineBlock(b2, cad2.getDificultad());
+    centro.notificarNuevoBloque(b2);
 
-        // Creamos centro electoral y registramos las mesas
-        CentroElectoralSubject centro;
-        centro.attach(mesa1);
-        centro.attach(mesa2);
-        centro.attach(mesa3);
+    // --- bloque 3 minado por mesa3 ---
+    vector<Voto> votos3 = { Voto("voter_005","Candidato B"),
+                            Voto("voter_006","Candidato C") };
+    Blockchain& cad3 = mesa3.getCadena();
+    Block b3(cad3.getSize(), cad3.getUltimoBloque().current_hash, votos3);
+    cad3.mineBlock(b3, cad3.getDificultad());
+    centro.notificarNuevoBloque(b3);
 
-        // mesa 1 registra votos y mina un bloque
-        vector<Voto> votos1;
-        votos1.push_back(Voto("voter_001", "Candidato A"));
-        votos1.push_back(Voto("voter_002", "Candidato B"));
+    // las 3 cadenas
+    mesa1.getCadena().imprimirCadena();
+    mesa2.getCadena().imprimirCadena();
+    mesa3.getCadena().imprimirCadena();
 
-        Block b1(bc.getSize(), bc.getUltimoBloque().current_hash, votos1);
-        bc.mineBlock(b1, bc.getDificultad());
+    // Estado normal
+    cout << "\n--- Estado normal ---\n";
+    cout << "mesa1 valida? "   << (mesa1.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa2 valida? "   << (mesa2.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa3 valida? "   << (mesa3.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa1 == mesa2? " << (Blockchain::sonIguales(mesa1.getCadena(), mesa2.getCadena()) ? "SI":"NO") << endl;
+    cout << "mesa1 == mesa3? " << (Blockchain::sonIguales(mesa1.getCadena(), mesa3.getCadena()) ? "SI":"NO") << endl;
 
-        cout << "\n--- Mesa 1 mino el bloque " << b1.indice << ", notificando a la red ---\n" << endl;
+    // --- alguien manipula la copia de mesa1 ---
+    mesa1.getCadena()._forzarCambioVoto(1, 0, "Candidato C");
 
-        // Notificamos el bloque nuevo a todas las mesas que registramos
-        centro.notificarNuevoBloque(b1); // todas las mesasverifican el bloque y lo agregan a su copia de la cadena
+    cout << "\n--- Tras manipular mesa1 ---\n";
+    cout << "mesa1 valida? "   << (mesa1.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa2 valida? "   << (mesa2.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa3 valida? "   << (mesa3.getCadena().isChainValid() ? "SI":"NO") << endl;
+    cout << "mesa1 == mesa2? " << (Blockchain::sonIguales(mesa1.getCadena(), mesa2.getCadena()) ? "SI":"NO") << endl;
+    cout << "mesa1 == mesa3? " << (Blockchain::sonIguales(mesa1.getCadena(), mesa3.getCadena()) ? "SI":"NO") << endl;
 
-        //resultado
-        bc.imprimirCadena();
-        cout << "Cadena valida? " << (bc.isChainValid() ? "SI" : "NO") << endl;
-
-        return 0;}
+    return 0;}
