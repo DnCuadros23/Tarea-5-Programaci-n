@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <algorithm>
 using namespace std;
 struct Voto {
     string votanteid; //ej votante_001
@@ -150,35 +151,73 @@ public:
             cout << "\n";
         }
         cout << "=====================================\n";
-    }
+    }};
 
-};
+class MesaElectoralObserver {
+    public:
+    virtual void update(Block& bloque) = 0;};
+
+class MesaElectoral : public MesaElectoralObserver {
+private:
+    int indice;
+    Blockchain& bc;
+public:
+    MesaElectoral(int ind) : bc(Blockchain::getInstance()), indice(ind) {}
+    void update(Block& bloque) override {
+        cout << "La mesa " << indice << " recibio el bloque " << bloque.indice << endl;
+        if (bc.getUltimoBloque().current_hash == bloque.current_hash) {
+            cout << "El bloque " << bloque.indice << " ya estaba en la cadena" << endl;
+            return;}
+
+        if (bloque.current_hash == bloque.calcularhash()) {
+            bc.agregarBloque(bloque);
+            cout << "Se agrego el bloque " << bloque.indice << endl;}
+
+        else cout << "No se pudo agregar el bloque " << bloque.indice << endl;}};
+
+    class CentroElectoralSubject {
+    private:
+        vector<MesaElectoralObserver*> observers;
+    public:
+        CentroElectoralSubject() = default;
+
+        void attach(MesaElectoralObserver &mesa) {
+            observers.push_back(&mesa);}
+
+        void notificarNuevoBloque(Block &bloque) {
+            for_each(observers.begin(), observers.end(), [&bloque](MesaElectoralObserver* observer) {
+                observer->update(bloque);});}};
 
 
+    int main(){
+        Blockchain& bc = Blockchain::getInstance();
 
+        //Creamos las mesas
+        MesaElectoral mesa1(1);
+        MesaElectoral mesa2(2);
+        MesaElectoral mesa3(3);
 
-int main(){
-    //Probando algunos votos
-    Blockchain& bc = Blockchain::getInstance();
+        // Creamos centro electoral y registramos las mesas
+        CentroElectoralSubject centro;
+        centro.attach(mesa1);
+        centro.attach(mesa2);
+        centro.attach(mesa3);
 
-    // Bloque 1
-    vector<Voto> votos1;
-    votos1.push_back(Voto("voter_001", "Candidato A"));
-    votos1.push_back(Voto("voter_002", "Candidato B"));
+        // mesa 1 registra votos y mina un bloque
+        vector<Voto> votos1;
+        votos1.push_back(Voto("voter_001", "Candidato A"));
+        votos1.push_back(Voto("voter_002", "Candidato B"));
 
-    Block b1(bc.getSize(), bc.getUltimoBloque().current_hash, votos1);
-    bc.mineBlock(b1, bc.getDificultad());
-    bc.agregarBloque(b1);
+        Block b1(bc.getSize(), bc.getUltimoBloque().current_hash, votos1);
+        bc.mineBlock(b1, bc.getDificultad());
 
-    // Bloque 2
-    vector<Voto> votos2;
-    votos2.push_back(Voto("voter_003", "Candidato A"));
+        cout << "\n--- Mesa 1 mino el bloque " << b1.indice << ", notificando a la red ---\n" << endl;
 
-    Block b2(bc.getSize(), bc.getUltimoBloque().current_hash, votos2);
-    bc.mineBlock(b2, bc.getDificultad());
-    bc.agregarBloque(b2);
+        // Notificamos el bloque nuevo a todas las mesas que registramos
+        centro.notificarNuevoBloque(b1); // todas las mesasverifican el bloque y lo agregan a su copia de la cadena
 
-    bc.imprimirCadena();
-    cout << "Cadena valida? " << (bc.isChainValid() ? "SI" : "NO") << endl;
-    return 0;
-};
+        //resultado
+        bc.imprimirCadena();
+        cout << "Cadena valida? " << (bc.isChainValid() ? "SI" : "NO") << endl;
+
+        return 0;}
